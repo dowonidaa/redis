@@ -36,7 +36,7 @@ public class StoreController {
         return storeService.update(id, storeDto);
     }
 
-    @DeleteMapping("{/id}")
+    @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
         storeService.delete(id);

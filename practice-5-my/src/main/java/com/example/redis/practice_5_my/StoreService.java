@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,14 +20,14 @@ public class StoreService {
 
     private final StoreRepository storeRepository;
 
-    @CachePut(cacheNames = "store", key = "#result.id")
+    // 새로 만든 상점은 다음 검색에서 등장할 수 있게 기존의 전체 조회 캐시 삭제
+    // 인지도가 높지 않을 가능성이 있으므로 생성시 추가 캐시 생성 X
+    @CacheEvict(cacheNames = "storeAllCache", allEntries = true)
     public StoreDto create(StoreDto storeDto) {
-        Store store = StoreConverter.convertToEntity(storeDto);
-        storeRepository.save(store);
-        return storeDto;
+        return StoreConverter.convertToDto(storeRepository.save(StoreConverter.convertToEntity(storeDto)));
     }
 
-    @Cacheable(cacheNames = "store", key = "args[0]")
+    @Cacheable(cacheNames = "storeCache", key = "args[0]")
     public StoreDto readOne(Long id) {
         Store store = storeRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
@@ -34,7 +35,7 @@ public class StoreService {
 
     }
 
-    @Cacheable(cacheNames = "storeAll", key = "methodName")
+    @Cacheable(cacheNames = "storeAllCache", key = "methodName")
     public List<StoreDto> readAll() {
         return storeRepository.findAll()
                 .stream()
@@ -43,15 +44,21 @@ public class StoreService {
     }
 
 
-    @CachePut(cacheNames = "store", key = "args[0]")
-    @CacheEvict(cacheNames = "storeAll", allEntries = true)
+    @CachePut(cacheNames = "storeCache", key = "args[0]")
+    @CacheEvict(cacheNames = "storeAllCache", allEntries = true)
     public StoreDto update(Long id, StoreDto dto) {
         Store store = storeRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         store.update(dto);
         return StoreConverter.convertToDto(store);
     }
 
-    @CacheEvict(cacheNames = {"storeAll","store"}, key = "args[0]")
+
+    @Caching(
+            evict = {
+                    @CacheEvict(cacheNames = "storeCache", key = "args[0]"),
+                    @CacheEvict(cacheNames = "storeAllCache", allEntries = true)
+            }) //여러 조건 넣을때 유용
+//    @CacheEvict(cacheNames = {"storeAllCache","storeCache"}, key = "args[0]")
     public void delete(Long id) {
         storeRepository.deleteById(id);
     }

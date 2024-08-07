@@ -27,8 +27,20 @@ public class CacheConfig {
                 .serializeValuesWith(
                         SerializationPair.fromSerializer(RedisSerializer.java())
                 );
+
+        //단일 객체 조회
+        RedisCacheConfiguration individual = RedisCacheConfiguration
+                .defaultCacheConfig()
+                .disableCachingNullValues()
+                .entryTtl(Duration.ofSeconds(20))
+                .enableTimeToIdle() //20 이내에 조회되면 다시 20초 리셋 기능
+                .computePrefixWith(CacheKeyPrefix.simple())
+                .serializeValuesWith(
+                        SerializationPair.fromSerializer(RedisSerializer.json())
+                );
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(cacheConfiguration)
+                .withCacheConfiguration("storeCache", individual)
                 .build();
     }
 }
