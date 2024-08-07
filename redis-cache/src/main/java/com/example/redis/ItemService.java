@@ -23,6 +23,7 @@ public class ItemService {
         this.itemRepository = itemRepository;
     }
 
+    @CachePut(cacheNames = "itemCache", key = "#result.id")
     public ItemDto create(ItemDto dto) {
         return ItemDto.fromEntity(itemRepository.save(Item.builder()
                 .name(dto.getName())
@@ -31,6 +32,21 @@ public class ItemService {
                 .build()));
     }
 
+
+    //이 메서드의 결과는 캐싱이 가능하다
+    // cacheNames: 적용할 캐시 규칙을 지정하기 위한 이름
+    // cacheNames: 이 메서드로 인해서 만들어질 캐시를 지칭하는 이름
+    // key: 캐시 데이터를 구분하기 위해 활용하는 값
+    @Cacheable(cacheNames = "itemCache", key = "args[0]")
+    public ItemDto readOne(Long id) {
+        log.info("Read One: {}", id);
+        return itemRepository.findById(id)
+                .map(ItemDto::fromEntity)
+                .orElseThrow(() ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND));
+    }
+
+    @Cacheable(cacheNames = "itemAllCache", key = "methodName")
     public List<ItemDto> readAll() {
         return itemRepository.findAll()
                 .stream()
@@ -38,13 +54,9 @@ public class ItemService {
                 .toList();
     }
 
-    public ItemDto readOne(Long id) {
-        return itemRepository.findById(id)
-                .map(ItemDto::fromEntity)
-                .orElseThrow(() ->
-                        new ResponseStatusException(HttpStatus.NOT_FOUND));
-    }
-
+    @CachePut(cacheNames = "itemCache", key = "args[0]")
+    @CacheEvict(cacheNames = "itemAllCache", allEntries = true)
+//    @CacheEvict(cacheNames = "itemAllCache", key = "'readAll'")
     public ItemDto update(Long id, ItemDto dto) {
         Item item = itemRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
@@ -54,8 +66,14 @@ public class ItemService {
         return ItemDto.fromEntity(itemRepository.save(item));
     }
 
+    @CacheEvict(cacheNames = {"itemAllCache","itemCache"}, key = "args[0]")
     public void delete(Long id) {
         itemRepository.deleteById(id);
+    }
+
+    @Cacheable(cacheNames = "itemSearchCache", key = "{args[0], args[1].pageNumber, args[1].pageSize}")
+    public Page<ItemDto> searchByName(String query, Pageable pageable) {
+        return itemRepository.findAllByNameContains(query, pageable).map(ItemDto::fromEntity);
     }
 
 }
