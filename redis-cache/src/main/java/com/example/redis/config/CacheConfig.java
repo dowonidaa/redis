@@ -9,11 +9,13 @@ import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair;
 import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.time.Duration;
 
 @Configuration
 @EnableCaching
+@EnableScheduling
 public class CacheConfig {
 
     @Bean

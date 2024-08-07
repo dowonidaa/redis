@@ -2,26 +2,57 @@ package com.example.redis;
 
 import com.example.redis.domain.Item;
 import com.example.redis.domain.ItemDto;
+import com.example.redis.domain.ItemOrder;
+import com.example.redis.domain.ItemOrderDto;
 import com.example.redis.repo.ItemRepository;
+import com.example.redis.repo.OrderRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.redis.core.ListOperations;
+import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
 public class ItemService {
+
     private final ItemRepository itemRepository;
-    public ItemService(ItemRepository itemRepository) {
+    private final OrderRepository orderRepository;
+    private final ZSetOperations<String, ItemDto> rankOps;
+    private final RedisTemplate<String, ItemOrderDto> orderTemplate;
+    private final ListOperations<String, ItemOrderDto> orderOps;
+    private final ReactiveRedisTemplate reactiveRedisTemplate;
+
+    public ItemService(ItemRepository itemRepository,
+                       OrderRepository orderRepository,
+                       RedisTemplate<String, ItemDto> rankTemplate,
+                       RedisTemplate<String, ItemOrderDto> orderTemplate,
+                       @Qualifier("reactiveRedisTemplate") ReactiveRedisTemplate reactiveRedisTemplate) {
         this.itemRepository = itemRepository;
+        this.orderRepository = orderRepository;
+        this.rankOps = rankTemplate.opsForZSet();
+        this.orderTemplate = orderTemplate;
+        this.orderOps = this.orderTemplate.opsForList();
+        this.reactiveRedisTemplate = reactiveRedisTemplate;
     }
+
 
     @CachePut(cacheNames = "itemCache", key = "#result.id")
     public ItemDto create(ItemDto dto) {
@@ -75,5 +106,48 @@ public class ItemService {
     public Page<ItemDto> searchByName(String query, Pageable pageable) {
         return itemRepository.findAllByNameContains(query, pageable).map(ItemDto::fromEntity);
     }
+
+    public void purchase(ItemOrderDto dto) {
+        Item item = itemRepository.findById(dto.getItemId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+//        orderRepository.save(ItemOrder.builder()
+//                .item(item)
+//                .count(1)
+//                .build());
+
+        orderOps.rightPush("orderCache::behind", dto);
+        rankOps.incrementScore(
+                "soldRanks",
+                ItemDto.fromEntity(item),
+                1
+        );
+    }
+
+    @Transactional
+    @Scheduled(fixedRate = 20, timeUnit = TimeUnit.SECONDS)
+    public void insertOrders() {
+        boolean exists = Optional.ofNullable(orderTemplate.hasKey("orderCache::behind")).orElse(false);
+
+        if (!exists) {
+            log.info("no exists Cache");
+            return;
+        }
+        orderTemplate.rename("orderCache::behind", "orderCache::now"); // 데이터 끊어주는 용도 이름변경하면 그 뒤로 들어오는 주문은 다시 orderCache::behind로 들어감
+        orderRepository.saveAll(orderOps.range("orderCache::now", 0,-1).stream()
+                .map(dto -> ItemOrder.builder()
+                        .itemId(dto.getItemId())
+                        .count(dto.getCount())
+                        .build())
+                .toList());
+        orderTemplate.delete("orderCache::now");
+
+    }
+
+    public List<ItemDto> getMostSold() {
+        Set<ItemDto> ranks = rankOps.reverseRange("soldRanks", 0, 9);
+        if (ranks == null) return Collections.emptyList();
+        return ranks.stream().toList();
+    }
+
 
 }
